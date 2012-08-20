@@ -15,8 +15,7 @@ import org.apache.hadoop.io.SequenceFile;
 import org.apache.hadoop.io.Text;
 import org.apache.hadoop.mapreduce.Job;
 import org.apache.hadoop.mapreduce.Mapper;
-import org.apache.hadoop.mapreduce.Reducer;
-import org.apache.hadoop.mapreduce.Reducer.Context;
+import org.apache.hadoop.mapreduce.Reducer; 
 import org.apache.hadoop.mapreduce.lib.input.SequenceFileInputFormat;
 import org.apache.hadoop.mapreduce.lib.input.TextInputFormat;
 import org.apache.hadoop.mapreduce.lib.output.SequenceFileOutputFormat;
@@ -26,21 +25,23 @@ import org.apache.mahout.common.AbstractJob;
 import org.apache.mahout.common.Pair;
 import org.apache.mahout.common.iterator.sequencefile.PathType;
 import org.apache.mahout.common.iterator.sequencefile.SequenceFileDirIterator;
+
 /**
- * This class define job that assign unique sequential id from 1 ~ x
+ * This class define job that assign unique sequential id from 0 ~ x
  * data flow is following.
  * 1. first mapper assign row number in this partition id and emit row number using partition id as key
  * 2. first reducer get maximum row number for partition id
  * 3. sequence file dir iterator read how many rows in each partition and calculate offset for partitions.
  * 4. second mapper load offsets per partition id and read first mapper`s intermediate file.
  *    emit row number in given partition id + offset for given partition id
- * @author 1000668
+ * @author doyoungYoon
  *
  */
 public class SequentialIdGeneratorJob extends AbstractJob {
-  private static final String RECORDS_PATH = SequentialIdGeneratorJob.class.getName() + ".recordsPath";
-  private static final String SUMMARY_PATH = SequentialIdGeneratorJob.class.getName() + ".summaryPath";
-  private static final String START_INDEX = SequentialIdGeneratorJob.class.getName() + ".startIndex";
+  //private static final Logger log = LoggerFactory.getLogger(SequentialIdGeneratorJob.class);
+  public static final String RECORDS_PATH = SequentialIdGeneratorJob.class.getName() + ".recordsPath";
+  public static final String SUMMARY_PATH = SequentialIdGeneratorJob.class.getName() + ".summaryPath";
+  public static final String START_INDEX = SequentialIdGeneratorJob.class.getName() + ".startIndex";
   public static long totalIdCount = 0;
   
   
@@ -65,19 +66,13 @@ public class SequentialIdGeneratorJob extends AbstractJob {
     if (parsedArgs == null) {
       return -1;
     }
-    /*
-    Job generateJob = prepareJob(getInputPath(), getOutputPath(), TextInputFormat.class, 
-        GenerateIdMapper.class, NullWritable.class, Text.class, TextOutputFormat.class);
-    generateJob.getConfiguration().setLong(START_INDEX, Long.parseLong(getOption("startIndex")));
-    generateJob.waitForCompletion(true);
-    */
     
     Path inputPath = getInputPath();
     Path recordsPath = getTempPath("records");
     Path summaryPath = getTempPath("summary");
     FileSystem fs = FileSystem.get(getConf());
     
-    // 1. count how many records(lines) in each partition. 
+    //  1. count how many records(lines) in each partition. 
     //  2. store each lines in each partition into temp files.
     //  step 2 is necessary because hadoop partition into into differenct partition id each time.
     //
@@ -132,13 +127,16 @@ public class SequentialIdGeneratorJob extends AbstractJob {
       FileSystem fs = FileSystem.get(conf);
       Path writerPath = new Path(dir, String.format("records%05d", partitionId.get()));
       writer = SequenceFile.createWriter(fs, conf, writerPath, Text.class, Text.class);
+      //initialize curId
+      curId = 0;
     }
+    
     @Override
     protected void cleanup(Context context) throws IOException,
         InterruptedException {
       IOUtils.closeStream(writer);
-      //writer.close();
     }
+    
     public void map(LongWritable key, Text value, Context context)
         throws IOException, InterruptedException {
       // note: if line count for this partition should be 1 based.

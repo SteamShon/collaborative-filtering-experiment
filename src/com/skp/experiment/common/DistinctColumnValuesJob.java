@@ -48,7 +48,7 @@ public class DistinctColumnValuesJob extends AbstractJob {
     distinctJob.getConfiguration().set(COLUMN_INDEXS, getOption("columnIndexs"));
     distinctJob.waitForCompletion(true);
     
-    EvaluatorUtil.deletePartFiles(getConf(), getOutputPath());
+    HadoopClusterUtil.deletePartFiles(getConf(), getOutputPath());
     return 0;
   }
   
@@ -90,7 +90,7 @@ public class DistinctColumnValuesJob extends AbstractJob {
       FileSystem fs = FileSystem.get(context.getConfiguration());
       columnIndexs = OptionParseUtil.decode(context.getConfiguration().get(COLUMN_INDEXS), DELIMETER);
       Path outputPath = FileOutputFormat.getOutputPath(context);
-      String taskId = OptionParseUtil.getAttemptId(context.getConfiguration());
+      String taskId = HadoopClusterUtil.getAttemptId(context.getConfiguration());
       for (Integer cidx : columnIndexs) {
         outStreams.put(cidx, fs.create(new Path(outputPath, cidx + "/" + taskId), true));
       }

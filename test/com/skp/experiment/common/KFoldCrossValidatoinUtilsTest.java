@@ -12,8 +12,10 @@ import org.apache.mahout.common.Pair;
 import org.junit.Before;
 import org.junit.Test;
 
+import com.skp.experiment.cf.als.hadoop.KFoldCrossValidationUtils;
+
 public class KFoldCrossValidatoinUtilsTest {
-  private List<String> seed;
+  private ArrayList<String> seed;
   private int testSize = 10;
   
   @Before

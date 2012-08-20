@@ -22,6 +22,8 @@ import org.apache.mahout.cf.taste.hadoop.TasteHadoopUtils;
 import org.apache.mahout.common.AbstractJob;
 import org.apache.mahout.common.Pair;
 
+import com.skp.experiment.common.HadoopClusterUtil;
+
 
 /* 
  * This class evaluate recommendations with flag indicating existence in validation set. 
@@ -63,7 +65,7 @@ public class EvaluatorJob extends AbstractJob {
     evaluateJob.waitForCompletion(true);
     writeOutEvaluationMetrics(getOutputPath()); 
     if (Boolean.parseBoolean(getOption("cleanUp")) == true) {
-      EvaluatorUtil.deletePartFiles(getConf(), getOutputPath());
+      HadoopClusterUtil.deletePartFiles(getConf(), getOutputPath());
     }
     return 0;
   }
@@ -85,7 +87,7 @@ public class EvaluatorJob extends AbstractJob {
         sb.append(stats.get(statKey) / totalCount);
       }
     }
-    EvaluatorUtil.writeToHdfs(getConf(), getOutputPath("_stats"), sb.toString());
+    HadoopClusterUtil.writeToHdfs(getConf(), getOutputPath("_stats"), sb.toString());
   }
  
   /** use secondary sort here */
@@ -103,8 +105,8 @@ public class EvaluatorJob extends AbstractJob {
         String userID = tokens[0];
         String itemID = tokens[1];
         float rating = Float.parseFloat(tokens[2]);
-        double flag = Double.parseDouble(tokens[sz-2]);
-        int itemCount = Integer.parseInt(tokens[sz-1]);
+        int itemCount = Integer.parseInt(tokens[sz-2]);
+        double flag = Double.parseDouble(tokens[sz-1]);
         outValue.set(itemID + DELIMETER + rating + DELIMETER + flag);
         outKey.set(userID, rating, itemCount);
         context.write(outKey, outValue);
@@ -144,8 +146,7 @@ public class EvaluatorJob extends AbstractJob {
       }
       List<Pair<Integer, Double>> scores = new ArrayList<Pair<Integer, Double>>();
       for (Evaluator evaluator : evaluators) {
-        Pair<Integer, Double> curScore = evaluator.evaluate(items, topK, itemCount, negativePref);
-        scores.add(curScore);
+        scores.addAll(evaluator.evaluate(items, topK, itemCount, negativePref));
       }
       outValue.set(userID + DELIMETER + itemCount + DELIMETER + scores.get(0).getFirst() 
           + DELIMETER + buildOutput(scores));

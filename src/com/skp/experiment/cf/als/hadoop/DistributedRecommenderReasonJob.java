@@ -105,7 +105,7 @@ public class DistributedRecommenderReasonJob extends AbstractJob {
     //minInputSplitSize = getConf().getLong("mapred.min.split.size", HadoopClusterUtil.DEFALUT_INPUT_SPLIT_SIZE); 
     //getConf().setLong("mapred.min.split.size", HadoopClusterUtil.DEFALUT_INPUT_SPLIT_SIZE);
     
-    Map<String, String> indexsSize = EvaluatorUtil.fetchTextFile(new Path(getOption("indexSize")), 
+    Map<String, String> indexsSize = ALSMatrixUtil.fetchTextFiles(new Path(getOption("indexSize")), 
         DELIMETER, Arrays.asList(0), Arrays.asList(1));
     
     if (getOption("associationRule") == null) {
@@ -266,10 +266,10 @@ public class DistributedRecommenderReasonJob extends AbstractJob {
       int topK = ctx.getConfiguration().getInt(TOP_K_SIMILARITY, 100);
       Path YPath = new Path(ctx.getConfiguration().get(ITEM_ITEM_SIMILARITY));
       Path itemMetaPath = new Path(ctx.getConfiguration().get(ITEM_META));
-      itemSims = ALSMatrixUtil.readMatrixByRowsInOrder(YPath, ctx, topK);
+      itemSims = ALSMatrixUtil.readMatrixByRowsTopK(YPath, ctx, topK);
       
       for (Entry<String, String> item : 
-        EvaluatorUtil.fetchTextFiles(ctx, itemMetaPath, DELIMETER, 
+        ALSMatrixUtil.fetchTextFiles(ctx, itemMetaPath, DELIMETER, 
             Arrays.asList(0), Arrays.asList(1)).entrySet()) {
         itemMetas.put(Integer.parseInt(item.getKey()), item.getValue());
       }

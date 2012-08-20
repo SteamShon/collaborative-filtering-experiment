@@ -1,5 +1,6 @@
 package com.skp.experiment.cf.evaluate.hadoop;
 
+import java.util.Arrays;
 import java.util.List;
 
 import org.apache.mahout.common.Pair;
@@ -8,7 +9,7 @@ public class ExpectedPercentileRankEvaluator implements Evaluator {
   private static final double EPS = 10e-6;
   public ExpectedPercentileRankEvaluator() {};
   @Override
-  public Pair<Integer, Double> evaluate(List<Pair<String, Double>> items,
+  public List<Pair<Integer, Double>> evaluate(List<Pair<String, Double>> items,
       int topK, int itemCount, double negativePref) {
     
     double expectedSum = 0.0;
@@ -31,8 +32,8 @@ public class ExpectedPercentileRankEvaluator implements Evaluator {
       expectedSum += realRate;
     }
     if (expectedSum < EPS) {
-      return new Pair<Integer, Double>(prefCount, 0.0);
+      return Arrays.asList(new Pair<Integer, Double>(prefCount, 0.0));
     }
-    return new Pair<Integer, Double>(prefCount, realSum / expectedSum);
+    return Arrays.asList(new Pair<Integer, Double>(prefCount, realSum / expectedSum));
   }
 }

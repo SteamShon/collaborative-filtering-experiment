@@ -46,6 +46,6 @@ public class OptionParseUtilTest {
     Configuration conf = new Configuration();
     String taskAttempId = "attempt_201207021707_0527_m_000000_0";
     conf.set("mapred.task.id", taskAttempId);
-    assertTrue(OptionParseUtil.getAttemptId(conf).equals("part-m-000000"));
+    assertTrue(HadoopClusterUtil.getAttemptId(conf).equals("part-m-000000"));
   }
 }

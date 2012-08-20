@@ -124,7 +124,7 @@ public class FilterInputJob extends AbstractJob {
       userIndex = conf.getInt(USER_INDEX, 0);
       
       if (conf.get(INVALID_ITEM_PATH) != null) {
-        invalidItems = EvaluatorUtil.fetchTextFiles(context, 
+        invalidItems = ALSMatrixUtil.fetchTextFiles(context, 
             new Path(conf.get(INVALID_ITEM_PATH)), 
             DELIMETER, Arrays.asList(itemIndex), Arrays.asList(itemIndex));
         context.setStatus("total: " + invalidItems.size());

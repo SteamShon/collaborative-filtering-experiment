@@ -15,6 +15,7 @@ import org.apache.hadoop.mrunit.mapreduce.ReduceDriver;
 import org.junit.Before;
 import org.junit.Test;
 
+import com.skp.experiment.cf.als.hadoop.ALSMatrixUtil;
 import com.skp.experiment.cf.evaluate.hadoop.EvaluatorUtil;
 import com.skp.experiment.common.DistinctColumnValuesJob.DistinctColumnValuesMapper;
 import com.skp.experiment.common.DistinctColumnValuesJob.DistinctColumnValuesReducer;
@@ -70,13 +71,13 @@ public class DistinctColumnValuesJobTest extends MahoutTestCase {
     });
     
     Map<String, String> lines = 
-        EvaluatorUtil.fetchTextFiles(new Path(outputDir + "/0"), ",", Arrays.asList(0), Arrays.asList(0));
+        ALSMatrixUtil.fetchTextFiles(new Path(outputDir + "/0"), ",", Arrays.asList(0), Arrays.asList(0));
     assertTrue(lines.size() == 2);
     assertTrue(lines.containsKey("A"));
     assertTrue(lines.containsKey("B"));
     
     lines = 
-        EvaluatorUtil.fetchTextFiles(new Path(outputDir + "/1"), ",", Arrays.asList(0), Arrays.asList(0));
+        ALSMatrixUtil.fetchTextFiles(new Path(outputDir + "/1"), ",", Arrays.asList(0), Arrays.asList(0));
     assertTrue(lines.size() == 2);
     assertTrue(lines.containsKey("1"));
     assertTrue(lines.containsKey("2"));

@@ -317,7 +317,7 @@ public class DistributedParallelALSFactorizationJob extends AbstractJob {
       int rowNums = ctx.getConfiguration().getInt("rowNums", -1);
       //OpenIntObjectHashMap<Vector> Y = ALSMatrixUtil.readMatrixByRows(YPath, ctx.getConfiguration());
       OpenIntObjectHashMap<Vector> Y = ALSMatrixUtil.readMatrixByRows(YPath, ctx);
-      Matrix YtransposeY = ALSMatrixUtil.retrieveDistributedRowMatrix(YtransposeYPath, numFeatures, numFeatures);
+      Matrix YtransposeY = ALSMatrixUtil.readDistributedRowMatrix(YtransposeYPath, numFeatures, numFeatures);
       //solver = new ImplicitFeedbackAlternatingLeastSquaresSolver(numFeatures, lambda, alpha, Y, YtransposeY);
 
       Preconditions.checkArgument(numFeatures > 0, "numFeatures was not set correctly!");

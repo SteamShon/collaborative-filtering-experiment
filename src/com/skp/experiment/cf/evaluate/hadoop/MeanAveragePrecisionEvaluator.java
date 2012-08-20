@@ -1,5 +1,6 @@
 package com.skp.experiment.cf.evaluate.hadoop;
 
+import java.util.Arrays;
 import java.util.List;
 
 import org.apache.hadoop.util.ToolRunner;
@@ -15,7 +16,7 @@ public class MeanAveragePrecisionEvaluator implements Evaluator {
   private static final double EPS = 10e-6;
 
   @Override
-  public Pair<Integer, Double> evaluate(List<Pair<String, Double>> items,
+  public List<Pair<Integer, Double>> evaluate(List<Pair<String, Double>> items,
       int topK, int itemCount, double negativePref) {
     int prefCnt = 0;
     double averagePrecisionSum = 0.0;
@@ -34,6 +35,6 @@ public class MeanAveragePrecisionEvaluator implements Evaluator {
       }
     }
     averagePrecisionSum /= (double) Math.min(itemCount,  topK);
-    return new Pair<Integer, Double>(prefCnt, averagePrecisionSum);
+    return Arrays.asList(new Pair<Integer, Double>(prefCnt, averagePrecisionSum));
   }  
 }

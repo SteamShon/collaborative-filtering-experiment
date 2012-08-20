@@ -20,8 +20,11 @@ import org.apache.mahout.math.SequentialAccessSparseVector;
 import org.apache.mahout.math.Vector;
 import org.apache.mahout.math.VectorWritable;
 import org.apache.mahout.math.hadoop.similarity.cooccurrence.Vectors;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class Text2DistributedRowMatrixJob extends AbstractJob {
+  private static final Logger log = LoggerFactory.getLogger(Text2DistributedRowMatrixJob.class);
 	public static final String ROW_IDX_KEY = "rowidx";
 	public static final String COL_IDX_KEY = "colidx";
 	public static final String VALUE_IDX_KEY = "valueidx";
@@ -102,27 +105,31 @@ public class Text2DistributedRowMatrixJob extends AbstractJob {
 		protected void map(LongWritable key, Text value, Context context)
 				throws IOException, InterruptedException {
 			String[] tokens = value.toString().split(DELIMETER);
-			if (textOutKey) {
-			  outRowIDText.set(tokens[rowIdx]);
-			} else {
-			  outRowID.set(Integer.parseInt(tokens[rowIdx]));
-			}
-			int index = Integer.parseInt(tokens[colIdx]);
-			float pref = 1;
-			if (valueIdx >= 0) {
-			  pref = Float.parseFloat(tokens[valueIdx]);
-			}
-			Vector outVector = null;
-			if (sequential) {
-			  outVector = new SequentialAccessSparseVector(numCols, 1);
-			} else {
-			  outVector = new RandomAccessSparseVector(numCols, 1);
-			}
-			outVector.set(index, pref);
-			if (textOutKey) {
-			  context.write(outRowIDText, new VectorWritable(outVector));
-			} else {
-			  context.write(outRowID, new VectorWritable(outVector));
+			try {
+  			if (textOutKey) {
+  			  outRowIDText.set(tokens[rowIdx]);
+  			} else {
+  			  outRowID.set(Integer.parseInt(tokens[rowIdx]));
+  			}
+  			int index = Integer.parseInt(tokens[colIdx]);
+  			float pref = 1;
+  			if (valueIdx >= 0) {
+  			  pref = Float.parseFloat(tokens[valueIdx]);
+  			}
+  			Vector outVector = null;
+  			if (sequential) {
+  			  outVector = new SequentialAccessSparseVector(numCols, 1);
+  			} else {
+  			  outVector = new RandomAccessSparseVector(numCols, 1);
+  			}
+  			outVector.set(index, pref);
+  			if (textOutKey) {
+  			  context.write(outRowIDText, new VectorWritable(outVector));
+  			} else {
+  			  context.write(outRowID, new VectorWritable(outVector));
+  			}
+			} catch (Exception e) {
+			  log.info(Text2DistributedRowMatrixJob.class.getName() + ":" + value.toString());
 			}
 		}
 	}

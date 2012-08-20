@@ -5,6 +5,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Map.Entry;
 
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.io.LongWritable;
@@ -55,7 +56,7 @@ public class ImprovedRepartitionJoinAndFilterJob extends AbstractJob {
     addOption("srcKeyIndex", "sidx", "src key index, seperated by comma");
     addOption("tgtTableOptions", "tgt", "list of option for tgt table {(tablename:keyindexs:valueindexs)}");
     addOption("mapOnly", null, "true if only repartition join needs to be used.");
-    addOption("defaultValue", null, "default value for outer join", "");
+    addOption("defaultValue", null, "default value for outer join", "null");
     if (parseArguments(args) == null) {
       return -1;
     }
@@ -275,20 +276,18 @@ public class ImprovedRepartitionJoinAndFilterJob extends AbstractJob {
       }
     }
   }
-  /**
-   * @author skplanet
-   *
-   */
+  
   public static class RepartitionJoinMapper extends 
     Mapper<LongWritable, Text, NullWritable, Text> {
-    //private static String srcTableName;
+    
     private static List<Integer> srcKeyIndexs;
     private static List<Integer> srcValueIndexs;
     
     private static List<JoinOption> tgtOptions;
-    private static List<Map<String, String>> tgtTableCaches = new ArrayList<Map<String, String>>();
+    private static List<Map<String, String>> tgtTableCaches;
     private static Text outValue = new Text();
-    private static String defaultValue = "";
+    private static String defaultValue = "null";
+    
     @Override
     protected void setup(Context ctx) throws IOException, InterruptedException {
       //srcTableName = ctx.getConfiguration().get(SRC_TABLE);
@@ -297,6 +296,8 @@ public class ImprovedRepartitionJoinAndFilterJob extends AbstractJob {
       
       tgtOptions = JoinOptionUtils.parseOptionStrings(ctx.getConfiguration().get(TGT_TABLE_OPTIONS));
       defaultValue = ctx.getConfiguration().get(DEFAULT_VALUE);
+      tgtTableCaches = new ArrayList<Map<String, String>>();
+      
       for (int i = 0; i < tgtOptions.size(); i++) {
         Path curPath = new Path(tgtOptions.get(i).getTable());
         Map<String, String> cache = JoinUtils.fetchTextFiles(ctx, 
@@ -319,13 +320,14 @@ public class ImprovedRepartitionJoinAndFilterJob extends AbstractJob {
       String srcTableKey = JoinOptionUtils.fetchFileds(tokens, srcKeyIndexs);
       String srcTableValue = JoinOptionUtils.fetchFileds(tokens, srcValueIndexs);
       boolean skipThisValue = false;
-      System.err.println("key: " + key.toString() + "\tvalue: " + value.toString());
+      //System.err.println("key: " + key.toString() + "\tvalue: " + value.toString());
       StringBuffer sb = new StringBuffer();
       //sb.append(value.toString());
       
       for (int i = 0; i < tgtOptions.size(); i++) {
         JoinOption option = tgtOptions.get(i);
         Map<String, String> curTgtTableCache = tgtTableCaches.get(i);
+        
         if (option.getType().equals("filter") && curTgtTableCache.containsKey(srcTableKey)) {
           skipThisValue = true;
           break;
@@ -355,7 +357,7 @@ public class ImprovedRepartitionJoinAndFilterJob extends AbstractJob {
           }
         }
       }
-      System.err.println("extra: " + sb.toString());
+      //System.err.println("extra: " + sb.toString());
       if (!skipThisValue) {
         String neccessary = joinTokens(tokens);
         String extra = sb.toString();
@@ -364,7 +366,7 @@ public class ImprovedRepartitionJoinAndFilterJob extends AbstractJob {
         } else {
           outValue.set(neccessary);
         }
-        System.err.println("output: " + outValue.toString());
+        //System.err.println("output: " + outValue.toString());
         //outValue.set(sb.toString());
         ctx.write(NullWritable.get(), outValue);
       }

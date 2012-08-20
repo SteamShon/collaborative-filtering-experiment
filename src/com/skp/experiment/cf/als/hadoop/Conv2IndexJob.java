@@ -21,16 +21,20 @@ import org.apache.mahout.common.iterator.FileLineIterator;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import com.skp.experiment.cf.evaluate.hadoop.EvaluatorUtil;
 import com.skp.experiment.common.DistinctColumnValuesJob;
+import com.skp.experiment.common.HadoopClusterUtil;
 import com.skp.experiment.common.OptionParseUtil;
 import com.skp.experiment.common.join.ImprovedRepartitionJoinAndFilterJob;
 import com.skp.experiment.common.join.JoinOptionUtils;
 import com.skp.experiment.common.mapreduce.IdentityMapper;
+import com.skp.experiment.common.parameter.DefaultOptionCreator;
 import com.skp.experiment.integeration.common.SequentialIdGeneratorJob;
-
+/**
+ * 
+ * @author doyoung
+ *
+ */
 public class Conv2IndexJob extends AbstractJob {
-  //public static Map<Integer, Long> indexSizes = new HashMap<Integer, Long>();
   private static final Logger log = LoggerFactory.getLogger(Conv2IndexJob.class);
   private static final String DELIMETER = ",";
   private boolean oldIndexExist = false;
@@ -43,7 +47,7 @@ public class Conv2IndexJob extends AbstractJob {
     addInputOption();
     addOutputOption();
     addOption("columnIndexs", "cidxs", "column indexs to convert into integer index");
-    addOption("mapOnlyColumnIndexs", "mcidxs", "column indexs to load into memory.");
+    addOption("mapOnlyColumnIndexs", "mcidxs", "column indexs to load into memory.", null);
     
     Map<String, String> parsedArgs = parseArguments(args);
     if (parsedArgs == null) {
@@ -53,10 +57,11 @@ public class Conv2IndexJob extends AbstractJob {
     
     Path distinctPath = getTempPath("distinct");
     String columnIndexs = getOption("columnIndexs");
-    String mapOnlyColumnIndexs = getOption("mapOnlyColumnIndexs");
     List<Integer> cidxs = OptionParseUtil.decode(columnIndexs, JoinOptionUtils.DELIMETER);
     List<Integer> mapOnlyCidxs = new ArrayList<Integer>();
-    mapOnlyCidxs = OptionParseUtil.decode(mapOnlyColumnIndexs, JoinOptionUtils.DELIMETER);
+    if (getOption("mapOnlyColumnIndexs") != null) {
+      mapOnlyCidxs = OptionParseUtil.decode(getOption("mapOnlyColumnIndexs"), JoinOptionUtils.DELIMETER);
+    }
     
     // step 1. get distinct values for columnIndexs
     Map<Integer, Long> totalIndexSizes = buildIndex(getInputPath(), columnIndexs, cidxs, getOutputPath());
@@ -65,8 +70,12 @@ public class Conv2IndexJob extends AbstractJob {
     
     // step 3. substitute column values with indexs
     Path tgtPath = getInputPath();
-    String[] jobArgs = null;
+    
     for (Integer cidx : cidxs) {
+      log.info("Subs: {}:{}", cidx, tgtPath.toString());
+      String[] jobArgs = null;
+      ImprovedRepartitionJoinAndFilterJob joinJob = new ImprovedRepartitionJoinAndFilterJob();
+      joinJob.setConf(getConf());
       if (mapOnlyCidxs.contains(cidx)) {
         jobArgs = new String[]{
             "-i", tgtPath.toString(), "-o", new Path(distinctPath, cidx + "_append").toString(), 
@@ -80,12 +89,11 @@ public class Conv2IndexJob extends AbstractJob {
             pathToIndexOutput(cidx, true).toString() + ":" + cidx + ":1:0:sub"
         };
       }
-       
-      ToolRunner.run(new ImprovedRepartitionJoinAndFilterJob(), jobArgs);
+      joinJob.run(jobArgs);
       tgtPath = new Path(distinctPath, cidx + "_append");
     }
     
-    EvaluatorUtil.renamePath(getConf(), tgtPath, getOutputPath());
+    HadoopClusterUtil.renamePath(getConf(), tgtPath, getOutputPath());
     return 0;
   }
   private boolean checkIndexExist() throws IOException {
@@ -176,9 +184,9 @@ public class Conv2IndexJob extends AbstractJob {
     StringBuffer sb = new StringBuffer();
     for (Entry<Integer, Long> idxSize : indexSizes.entrySet()) {
       //System.out.println("writting out\t" + idxSize.getKey() + ", " + idxSize.getValue());
-      sb.append(idxSize.getKey() + DELIMETER + idxSize.getValue() + EvaluatorUtil.NEWLINE);
+      sb.append(idxSize.getKey() + DELIMETER + idxSize.getValue() + DefaultOptionCreator.NEWLINE);
     }
-    EvaluatorUtil.writeToHdfs(getConf(), output, sb.toString(), false);
+    HadoopClusterUtil.writeToHdfs(getConf(), output, sb.toString(), false);
   }
   
   //hadoop 0.20.2 doens`t support append mode

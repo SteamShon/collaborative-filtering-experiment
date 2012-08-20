@@ -25,6 +25,7 @@ import org.apache.hadoop.util.ToolRunner;
 import org.apache.mahout.cf.taste.hadoop.TasteHadoopUtils;
 import org.apache.mahout.common.AbstractJob;
 
+import com.skp.experiment.common.HadoopClusterUtil;
 import com.skp.experiment.common.OptionParseUtil;
 
 public class MultiDatasetJaccardJob extends AbstractJob {
@@ -71,7 +72,7 @@ public class MultiDatasetJaccardJob extends AbstractJob {
     jaccardJob.waitForCompletion(true);
     writeResultStat(getOutputPath("_stats"));  
     if (Boolean.parseBoolean(getOption("cleanUp")) == true) {
-      EvaluatorUtil.deletePartFiles(getConf(), getOutputPath());
+      HadoopClusterUtil.deletePartFiles(getConf(), getOutputPath());
     }
     return 0;
   }
@@ -90,7 +91,7 @@ public class MultiDatasetJaccardJob extends AbstractJob {
         EvaluatorUtil.getResultSumPerColumns(getConf(), getOutputPath(), Arrays.asList(1), false);
     long totalCount = stats.get(EvaluatorUtil.RECORD_COUNT_SUM_INDEX).longValue();
     String outputString = totalCount + DELIMETER + (stats.get(1) / totalCount);
-    EvaluatorUtil.writeToHdfs(getConf(), output, outputString);
+    HadoopClusterUtil.writeToHdfs(getConf(), output, outputString);
   }
   public static class MultiSetJaccardMapper 
     extends Mapper<LongWritable, Text, Text, Text>{

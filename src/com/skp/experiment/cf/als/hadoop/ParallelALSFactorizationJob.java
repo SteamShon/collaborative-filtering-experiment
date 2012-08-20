@@ -21,16 +21,14 @@ import java.io.BufferedWriter;
 import java.io.IOException;
 import java.io.OutputStreamWriter;
 import java.net.InetAddress;
-import java.net.UnknownHostException;
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Map.Entry;
 import java.util.Random;
 
 import org.apache.hadoop.conf.Configuration;
-import org.apache.hadoop.fs.FSDataOutputStream;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.FileUtil;
 import org.apache.hadoop.fs.Path;
@@ -39,12 +37,8 @@ import org.apache.hadoop.io.LongWritable;
 import org.apache.hadoop.io.NullWritable;
 import org.apache.hadoop.io.SequenceFile;
 import org.apache.hadoop.io.Text;
-import org.apache.hadoop.mapred.ClusterStatus;
-import org.apache.hadoop.mapred.JobClient;
-import org.apache.hadoop.mapred.JobConf;
 import org.apache.hadoop.mapreduce.Job;
 import org.apache.hadoop.mapreduce.Mapper;
-import org.apache.hadoop.mapreduce.Mapper.Context;
 import org.apache.hadoop.mapreduce.lib.input.SequenceFileInputFormat;
 import org.apache.hadoop.mapreduce.lib.input.TextInputFormat;
 import org.apache.hadoop.mapreduce.lib.output.SequenceFileOutputFormat;
@@ -54,7 +48,6 @@ import org.apache.mahout.cf.taste.hadoop.TasteHadoopUtils;
 import org.apache.mahout.cf.taste.impl.common.FullRunningAverage;
 import org.apache.mahout.cf.taste.impl.common.RunningAverage;
 import org.apache.mahout.common.AbstractJob;
-import org.apache.mahout.common.HadoopUtil;
 import org.apache.mahout.common.Pair;
 import org.apache.mahout.common.RandomUtils;
 import org.apache.mahout.common.mapreduce.MergeVectorsCombiner;
@@ -80,6 +73,7 @@ import com.skp.experiment.cf.evaluate.hadoop.EvaluatorUtil;
 import com.skp.experiment.cf.math.hadoop.MatrixDistanceSquaredJob;
 import com.skp.experiment.common.HadoopClusterUtil;
 import com.skp.experiment.common.Text2DistributedRowMatrixJob;
+import com.skp.experiment.common.parameter.DefaultOptionCreator;
 import com.skp.experiment.math.als.hadoop.ImplicitFeedbackAlternatingLeastSquaresSolver;
 
 /**
@@ -133,14 +127,9 @@ public class ParallelALSFactorizationJob extends AbstractJob {
   private boolean largeUserFeatures;
   private static long taskTimeout = 600000 * 6;
   private static final int multiplyMapTasks = 100000;
-  //private static long minInputSplitSize;
   private static int rateIndex = 2;
-  private static final float SAFE_MARGIN = 2.5f;
+  private static final float SAFE_MARGIN = 3.5f;
   
-  public ParallelALSFactorizationJob() {};
-  public ParallelALSFactorizationJob(Configuration conf) {
-    setConf(conf);
-  }
   
   public static void main(String[] args) throws Exception {
     ToolRunner.run(new ParallelALSFactorizationJob(), args);
@@ -148,7 +137,6 @@ public class ParallelALSFactorizationJob extends AbstractJob {
 
   @Override
   public int run(String[] args) throws Exception {
-
     addInputOption();
     addOutputOption();
     addOption("lambda", null, "regularization parameter", true);
@@ -163,14 +151,15 @@ public class ParallelALSFactorizationJob extends AbstractJob {
     addOption("rmseCurve", null, "true if want to extract rmse curve", String.valueOf(true));
     addOption("cleanUp", null, "true if want to clean up temporary matrix", String.valueOf(true));
     addOption("useTransform", null, "true if using logarithm as transform", String.valueOf(true));
-    
+    addOption("rateIndex", null, "0 based index for rate column in input file.", String.valueOf(2));
     Map<String,String> parsedArgs = parseArguments(args);
     if (parsedArgs == null) {
       return -1;
     }
     
     try {
-      Map<String, String> indexSizesTmp = EvaluatorUtil.fetchTextFile(new Path(getOption("indexSizes")), DELIMETER, 
+      /** step 0: fetch dimention of training set matrix. */
+      Map<String, String> indexSizesTmp = ALSMatrixUtil.fetchTextFiles(new Path(getOption("indexSizes")), DELIMETER, 
           Arrays.asList(0), Arrays.asList(1));
       
       numFeatures = Integer.parseInt(parsedArgs.get("--numFeatures"));
@@ -188,6 +177,7 @@ public class ParallelALSFactorizationJob extends AbstractJob {
       cleanUp = Boolean.parseBoolean(getOption("cleanUp"));
       useTransform = Boolean.parseBoolean(getOption("useTransform"));
       rateIndex = Integer.parseInt(getOption("rateIndex"));
+      
       if (useTransform) {
         // transform price into rating
         Job transformJob = prepareJob(getInputPath(), pathToTransformed(), TextInputFormat.class, 
@@ -195,6 +185,7 @@ public class ParallelALSFactorizationJob extends AbstractJob {
             TextOutputFormat.class);
         transformJob.waitForCompletion(true);
       } else {
+        
         FileUtil.copy(FileSystem.get(getConf()), getInputPath(), 
             FileSystem.get(getConf()), pathToTransformed(), false, getConf());
       }
@@ -291,7 +282,7 @@ public class ParallelALSFactorizationJob extends AbstractJob {
               calculateMatrixDistanceSquared(pathToM(currentIteration-1), pathToM(currentIteration), currentIteration);
           String currentRMSE = currentIteration + DELIMETER + UsquaredError.getFirst() + 
               DELIMETER + UsquaredError.getSecond() + DELIMETER + MsquaredError.getFirst() + 
-              DELIMETER + MsquaredError.getSecond() + EvaluatorUtil.NEWLINE;
+              DELIMETER + MsquaredError.getSecond() + DefaultOptionCreator.NEWLINE;
           rmsePerIteration += currentRMSE;
           log.info("iteration {}: {}", currentIteration, currentRMSE); 
         }
@@ -303,11 +294,11 @@ public class ParallelALSFactorizationJob extends AbstractJob {
       }
       return 0;
     } catch (Exception e) {
-      log.info("Exception: {}", e.getMessage());
+      e.printStackTrace();
       return -1;
     } finally {
       if (useRMSECurve) {
-        EvaluatorUtil.writeToHdfs(getConf(), getOutputPath("RMSE"), rmsePerIteration);
+        HadoopClusterUtil.writeToHdfs(getConf(), getOutputPath("RMSE"), rmsePerIteration);
       }
     }
   }
@@ -529,8 +520,8 @@ public class ParallelALSFactorizationJob extends AbstractJob {
       
       //OpenIntObjectHashMap<Vector> Y = ALSMatrixUtil.readMatrixByRows(YPath, ctx.getConfiguration());
       //OpenIntObjectHashMap<Vector> Y = ALSMatrixUtil.readMatrixByRows(YPath, ctx);
-      Matrix Y = ALSMatrixUtil.readMatrixByRows(YPath, ctx, numRows, numFeatures);
-      Matrix YtransposeY = ALSMatrixUtil.retrieveDistributedRowMatrix(YtransposeYPath, numFeatures, numFeatures);
+      Matrix Y = ALSMatrixUtil.readDenseMatrixByRows(YPath, ctx, numRows, numFeatures);
+      Matrix YtransposeY = ALSMatrixUtil.readDistributedRowMatrix(YtransposeYPath, numFeatures, numFeatures);
       
       solver = new ImplicitFeedbackAlternatingLeastSquaresSolver(numFeatures, lambda, alpha, Y, YtransposeY);
 

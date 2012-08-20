@@ -18,15 +18,9 @@
 package com.skp.experiment.cf.als.hadoop;
 
 import java.io.IOException;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
-import java.util.Map.Entry;
 import java.util.Random;
 
-import org.apache.hadoop.fs.FSDataOutputStream;
-import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.io.LongWritable;
 import org.apache.hadoop.io.NullWritable;
@@ -41,14 +35,13 @@ import org.apache.hadoop.mapreduce.lib.output.TextOutputFormat;
 import org.apache.hadoop.util.ToolRunner;
 import org.apache.mahout.cf.taste.hadoop.TasteHadoopUtils;
 import org.apache.mahout.common.AbstractJob;
-import org.apache.mahout.common.Pair;
 import org.apache.mahout.common.RandomUtils;
 
-import com.skp.experiment.common.KFoldCrossValidationUtils;
-import com.skp.experiment.common.OptionParseUtil;
 
 /**
- * <p>Split a recommendation dataset into a training and a test set</p>
+ * <p>(almost Stolen from mahout) Split a recommendation dataset into a training and a test set</p>
+ * <p>aggregate item:rating per users first, then roll dice which items will belong to trainingSet/probeSet per user_id.</p>
+ * <p>K Fold environment may not be feasible since modeling cost is large with ALS-WR with mapreduce</p>
  *
   * <p>Command line arguments specific to this class are:</p>
  *
@@ -60,18 +53,11 @@ import com.skp.experiment.common.OptionParseUtil;
  * </ol>
  */
 public class DatasetSplitter extends AbstractJob {
-
   private static final String TRAINING_PERCENTAGE = DatasetSplitter.class.getName() + ".trainingPercentage";
   private static final String PROBE_PERCENTAGE = DatasetSplitter.class.getName() + ".probePercentage";
   private static final String PART_TO_USE = DatasetSplitter.class.getName() + ".partToUse";
   private static final String KEY_INDEX = DatasetSplitter.class.getName() + ".keyIndex";
-  /*
-  private static final String K_FOLD = DatasetSplitter.class.getName() + ".kFold";
-  private static final String PROBE_SET = DatasetSplitter.class.getName() + ".probeSet";
-  private static final String TRAIN_SET = DatasetSplitter.class.getName() + ".trainSet";
-  public static String newline = System.getProperty("line.separator");
-  private static final int DEFAULT_K_FOLD = 4;
-  */
+ 
   private static final Text INTO_TRAINING_SET = new Text("T");
   private static final Text INTO_PROBE_SET = new Text("P");
 
@@ -92,7 +78,6 @@ public class DatasetSplitter extends AbstractJob {
     addOption("probePercentage", "p", "percentage of the data to use as probe set (default: " +
         DEFAULT_PROBE_PERCENTAGE + ')', String.valueOf(DEFAULT_PROBE_PERCENTAGE));
     addOption("keyIndex", "kidx", "key index for group by.", String.valueOf(0));
-    //addOption("kfold", "k", "number of fold for cross validation.", String.valueOf(DEFAULT_K_FOLD));
     
     Map<String, String> parsedArgs = parseArguments(args);
     if (parsedArgs == null) {
@@ -107,19 +92,6 @@ public class DatasetSplitter extends AbstractJob {
     Path trainingSetPath = new Path(getOutputPath(), "trainingSet");
     Path probeSetPath = new Path(getOutputPath(), "probeSet");
     
-    /*
-    Job markPreferences = prepareJob(getInputPath(), markedPrefs, TextInputFormat.class,
-        MarkPreferencesMapper.class, Text.class, Text.class, 
-        MarkPreferencesReducer.class, NullWritable.class, Text.class, 
-        TextOutputFormat.class);
-    markPreferences.getConfiguration().set(TRAINING_PERCENTAGE, String.valueOf(trainingPercentage));
-    markPreferences.getConfiguration().set(PROBE_PERCENTAGE, String.valueOf(probePercentage));
-    markPreferences.getConfiguration().setInt(KEY_INDEX, Integer.parseInt(getOption("keyIndex")));
-    markPreferences.getConfiguration().setInt(K_FOLD, Integer.parseInt(getOption("kfold")));
-    markPreferences.getConfiguration().set(TRAIN_SET, trainingSetPath.toString());
-    markPreferences.getConfiguration().set(PROBE_SET, probeSetPath.toString());
-    markPreferences.waitForCompletion(true);
-    */
     
     Job markPreferences = prepareJob(getInputPath(), markedPrefs, TextInputFormat.class, 
         MarkPreferencesMapper.class, Text.class, Text.class,
@@ -163,44 +135,12 @@ public class DatasetSplitter extends AbstractJob {
     private Random random;
     private double trainingBound;
     private double probeBound;
-    /*
-    private int kfold;
-    private static Map<Integer, FSDataOutputStream> trainStreams = new HashMap<Integer, FSDataOutputStream>();
-    private static Map<Integer, FSDataOutputStream> probeStreams = new HashMap<Integer, FSDataOutputStream>();
-    private static FileSystem fs;
-    */
+    
     @Override
     protected void setup(Context ctx) throws IOException, InterruptedException {
       random = RandomUtils.getRandom();
       trainingBound = Double.parseDouble(ctx.getConfiguration().get(TRAINING_PERCENTAGE));
       probeBound = trainingBound + Double.parseDouble(ctx.getConfiguration().get(PROBE_PERCENTAGE));
-      /*
-      kfold = ctx.getConfiguration().getInt(K_FOLD, DEFAULT_K_FOLD);
-      fs = FileSystem.get(ctx.getConfiguration());
-      String taskId = OptionParseUtil.getAttemptId(ctx.getConfiguration());
-      
-      for (int i = 0; i < kfold; i++) {
-        Path probeSet = new Path(ctx.getConfiguration().get(PROBE_SET) + "/" + i + "/" + 
-            taskId);
-        Path trainSet = new Path(ctx.getConfiguration().get(TRAIN_SET) + "/" + i + "/" + 
-            taskId);
-        trainStreams.put(i, fs.create(trainSet, true));
-        probeStreams.put(i, fs.create(probeSet, true));
-      }
-      */
-    }
-    
-    @Override
-    protected void cleanup(Context context) 
-        throws IOException, InterruptedException {
-      /*
-      for (Entry<Integer, FSDataOutputStream> files : trainStreams.entrySet()) {
-        files.getValue().close();
-      }
-      for (Entry<Integer, FSDataOutputStream> files : probeStreams.entrySet()) {
-        files.getValue().close();
-      }
-      */
     }
 
     @Override
@@ -214,37 +154,6 @@ public class DatasetSplitter extends AbstractJob {
           ctx.write(INTO_PROBE_SET, value);
         }
       }
-      /*
-      List<String> list = new ArrayList<String>();
-      for (Text value : values) {
-        list.add(value.toString());
-      }
-      // random shuffle 
-      // following require |number of items for this user| * 2. memory
-      KFoldCrossValidationUtils.randomSuffleInPlace(list); 
-      for (int i = 0; i < kfold; i++) {
-        Pair<List<String>, List<String>> trainingAndProbe = KFoldCrossValidationUtils.splitNth(list, kfold, i);
-        List<String> trains = trainingAndProbe.getFirst();
-        List<String> probes = trainingAndProbe.getSecond();
-        for (int t = 0; t < trains.size(); t++) {
-          trainStreams.get(i).writeBytes(trains.get(t) + newline);
-        }
-        for (int p = 0; p < probes.size(); p++) {
-          probeStreams.get(i).writeBytes(probes.get(p) + newline);
-        }
-      }
-      */
-      
-      /*
-      for (Text value : values) {
-        double randomValue = random.nextDouble();
-        if (randomValue <= trainingBound) {
-          ctx.write(INTO_TRAINING_SET, value);
-        } else if (randomValue <= probeBound) {
-          ctx.write(INTO_PROBE_SET, value);
-        }
-      }
-      */
     }
   }
   

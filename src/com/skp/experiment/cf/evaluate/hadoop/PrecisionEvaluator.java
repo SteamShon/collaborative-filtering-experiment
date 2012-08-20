@@ -1,5 +1,6 @@
 package com.skp.experiment.cf.evaluate.hadoop;
 
+import java.util.Arrays;
 import java.util.List;
 
 import org.apache.hadoop.util.ToolRunner;
@@ -9,7 +10,7 @@ public class PrecisionEvaluator implements Evaluator {
   public PrecisionEvaluator() {};
   
   @Override
-  public Pair<Integer, Double> evaluate(List<Pair<String, Double>> items,
+  public List<Pair<Integer, Double>> evaluate(List<Pair<String, Double>> items,
       int topK, int itemCount, double negativePref) {
     int prefCount = 0;
     double precision = 0.0;
@@ -22,6 +23,6 @@ public class PrecisionEvaluator implements Evaluator {
       }
     }
     precision = (double)prefCount / topK;
-    return new Pair<Integer, Double>(prefCount, precision);
+    return Arrays.asList(new Pair<Integer, Double>(prefCount, precision));
   }
 }

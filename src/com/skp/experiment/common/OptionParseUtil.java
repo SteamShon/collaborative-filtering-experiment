@@ -45,25 +45,4 @@ public class OptionParseUtil {
     return sb.toString();
   }
   
-  public static String getAttemptId(Configuration conf) throws IllegalArgumentException
-  {
-      if (conf == null) {
-          throw new NullPointerException("conf is null");
-      }
-
-      String taskId = conf.get("mapred.task.id");
-      if (taskId == null) {
-          throw new IllegalArgumentException("Configutaion does not contain the property mapred.task.id");
-      }
-
-      String[] parts = taskId.split("_");
-      if (parts.length != 6 ||
-          !parts[0].equals("attempt") ||
-          (!"m".equals(parts[3]) && !"r".equals(parts[3]))) {
-        throw new IllegalArgumentException("TaskAttemptId string : " + taskId + " is not properly formed");
-      }
-      
-      return "part-" + parts[3] + "-" + parts[4];
-  }
-  
 }

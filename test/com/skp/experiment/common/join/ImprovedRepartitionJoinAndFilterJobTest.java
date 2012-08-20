@@ -18,6 +18,7 @@ import org.apache.hadoop.mrunit.mapreduce.ReduceDriver;
 import org.junit.Before;
 import org.junit.Test;
 
+import com.skp.experiment.cf.als.hadoop.ALSMatrixUtil;
 import com.skp.experiment.cf.evaluate.hadoop.EvaluatorUtil;
 import com.skp.experiment.common.MahoutTestCase;
 import com.skp.experiment.common.join.ImprovedRepartitionJoinAndFilterJob.ImprovedRepartitionJoinMapper;
@@ -129,7 +130,7 @@ public class ImprovedRepartitionJoinAndFilterJobTest extends MahoutTestCase {
         });
         
         Map<String, String> lines = 
-            EvaluatorUtil.fetchTextFiles(new Path(outputDir.toString()), ",", Arrays.asList(0,1,2,3,4,5), Arrays.asList(0));
+            ALSMatrixUtil.fetchTextFiles(new Path(outputDir.toString()), ",", Arrays.asList(0,1,2,3,4,5), Arrays.asList(0));
         assertTrue(expected.get(joinTypes[i]).size() == lines.size());
        
         for (Entry<String, String> line : lines.entrySet()) {

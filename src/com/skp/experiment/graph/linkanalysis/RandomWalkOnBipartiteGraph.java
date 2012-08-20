@@ -27,16 +27,15 @@ import org.apache.mahout.math.DistributedRowMatrixWriter;
 import org.apache.mahout.math.Matrix;
 import org.apache.mahout.math.SparseMatrix;
 import org.apache.mahout.math.hadoop.DistributedRowMatrix;
-import org.apache.mahout.math.hadoop.TransposeJob;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.google.common.io.Closeables;
+import com.skp.experiment.cf.als.hadoop.ALSMatrixUtil;
 import com.skp.experiment.cf.evaluate.hadoop.EvaluatorUtil;
 import com.skp.experiment.cf.math.hadoop.MatrixMultiplyWithThresholdJob;
 import com.skp.experiment.cf.math.hadoop.MatrixRowNormalizeJob;
 import com.skp.experiment.common.DistributedRowMatrix2TextJob;
-import com.skp.experiment.common.HadoopClusterUtil;
 import com.skp.experiment.common.OptionParseUtil;
 import com.skp.experiment.common.Text2DistributedRowMatrixJob;
 import com.skp.experiment.common.join.ImprovedRepartitionJoinAndFilterJob;
@@ -86,7 +85,7 @@ public class RandomWalkOnBipartiteGraph extends AbstractJob {
       return -1;
     }
     Map<String, String> indexSizesTmp = 
-        EvaluatorUtil.fetchTextFile(new Path(getOption("indexSizes")), OptionParseUtil.DELIMETER, 
+        ALSMatrixUtil.fetchTextFiles(new Path(getOption("indexSizes")), OptionParseUtil.DELIMETER, 
         Arrays.asList(0), Arrays.asList(1));
     numUsers = Integer.parseInt(indexSizesTmp.get("0"));
     numItems = Integer.parseInt(indexSizesTmp.get("1"));
@@ -150,7 +149,9 @@ public class RandomWalkOnBipartiteGraph extends AbstractJob {
       
       //System.out.println("CU: " + CUtranspose.numCols() + "\t" + CUtranspose.numRows());
       //System.out.println("CI: " + CItranspose.numCols() + "\t" + CItranspose.numRows());
-      CUtranspose = timesWithThreshold(CItranspose, IUNorm, pathToProbsCU(iteration), gamma).transpose();
+      CUtranspose = timesWithThreshold(CItranspose, IUNorm, pathToProbsCU(iteration), gamma);
+      CUtranspose.setConf(getConf());
+      CUtranspose = CUtranspose.transpose();
       //printDistributedRowMatrix(CUtranspose, getTempPath("CU.transpose.conv." + Integer.toString(iteration)));
       //System.out.println("CU: " + CUtranspose.numCols() + "\t" + CUtranspose.numRows());
       CItranspose = timesWithThreshold(CUtranspose, UINorm, pathToProbsCI(iteration), gamma);
@@ -160,9 +161,13 @@ public class RandomWalkOnBipartiteGraph extends AbstractJob {
     if (retrieveTopKPerUser(CUtranspose.getRowPath(), getTempPath("output")) != 0) {
       return -1;
     }
+    if (retrieveTopKPerUser(CItranspose.getRowPath(), new Path(getOutputPath().toString() + "_inv")) != 0) {
+      return -1;
+    }
     if (appendIsDirectFlag(getInputPath(), getTempPath("output"), getOutputPath()) != 0) {
       return -1;
     }
+    
     return 0;
   }
   
@@ -173,33 +178,18 @@ public class RandomWalkOnBipartiteGraph extends AbstractJob {
       throw new CardinalityException(src.numRows(), other.numRows());
     }
     // multiply
-    Configuration initialConf = getConf();
+    Configuration initialConf = new Configuration(getConf());
     initialConf.set("mapred.child.java.opts", "-Xmx4g");
     initialConf.setLong("mapred.task.timeout", 600000 * 10);
     
-    @SuppressWarnings("deprecation")
     JobConf conf =
         MatrixMultiplyWithThresholdJob.createMatrixMultiplyWithThresholdJob(initialConf, src.getRowPath(), other.getRowPath(),
             output, other.numCols(), threshold);
     JobClient.runJob(conf);
-    // prune
-    /*
-    log.info("prunning with threshold {}", threshold);
-    Job pruneJob = PruneVectorWithThreasholdJob.createPruneVectorWithThresholdJob(new Configuration(), getTempPath("multiply"), output);
-    pruneJob.getConfiguration().setFloat(PruneVectorWithThreasholdJob.THRESHOLD, threshold);
-    pruneJob.waitForCompletion(true);
-    // return distributedRowMatrix form
-    */
+   
     DistributedRowMatrix out = new DistributedRowMatrix(output, getTempPath("tmp"), src.numCols(), other.numCols());
     out.setConf(conf);
     return out;
-  }
-  
-  private void printDistributedRowMatrix(DistributedRowMatrix matrix, Path output) throws Exception {
-    ToolRunner.run(new DistributedRowMatrix2TextJob(), new String[] {
-      "--input", matrix.getRowPath().toString(), "--output", 
-      output.toString()
-    });
   }
   
   /* */
@@ -229,7 +219,7 @@ public class RandomWalkOnBipartiteGraph extends AbstractJob {
   }
   
   
-  //TODO
+  //TODO: override this for various concepts
   private DistributedRowMatrix retrieveClassMatrix(Path classMatrixPath) {
     return null;
   }
@@ -237,22 +227,10 @@ public class RandomWalkOnBipartiteGraph extends AbstractJob {
   
   /* this method returns diagonal matrix with numItems x numItems cardinality */
   private DistributedRowMatrix createDigonalClass(int numItems, Path digonalMatrixPath, Configuration conf) throws IOException {
-  //private Matrix createDigonalClass(int numItems) throws IOException {
     Matrix digonalMatrix = new SparseMatrix(numItems, numItems);
     for (int idx = 0; idx < numItems; idx++) {
       digonalMatrix.set(idx, idx, 1.0);
     }
-    /*
-    Iterator<MatrixSlice> iter = digonalMatrix.iterator();
-    while (iter.hasNext()) {
-      MatrixSlice row = iter.next();
-      Iterator<Vector.Element> cols = row.vector().iterator();
-      while (cols.hasNext()) {
-        Vector.Element e = cols.next();
-        System.out.println(row.index() + "\t" + e.index() + ":" + e.get());
-      }
-    }
-    */
     DistributedRowMatrixWriter.write(digonalMatrixPath, conf, digonalMatrix);
     DistributedRowMatrix result = new DistributedRowMatrix(digonalMatrixPath, 
                                                            getTempPath("digonalClass"), 
@@ -280,7 +258,8 @@ public class RandomWalkOnBipartiteGraph extends AbstractJob {
   private int appendIsDirectFlag(Path train, Path tmpOutput, Path output) throws Exception {
     ToolRunner.run(new ImprovedRepartitionJoinAndFilterJob(), new String[]{
       "-i", tmpOutput.toString(), "-o", output.toString(), 
-      "-sidx", "0,1", "-tgt", train.toString() + ":0,1:0,1:2:outer"
+      "-sidx", "0,1", "-tgt", train.toString() + ":0,1:0,1:2:outer", 
+      "--defaultValue", "0"
     });
     return 0;
   }
