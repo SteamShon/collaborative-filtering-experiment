@@ -1,21 +1,23 @@
 package com.skp.experiment.cf.als.hadoop;
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.util.Arrays;
 import java.util.Iterator;
-import java.util.List;
 import java.util.Map;
 
-import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.io.IntWritable;
-import org.apache.hadoop.mapreduce.Job;
 import org.apache.hadoop.mapreduce.Mapper;
-import org.apache.hadoop.mapreduce.lib.input.SequenceFileInputFormat;
-import org.apache.hadoop.mapreduce.lib.output.SequenceFileOutputFormat;
 import org.apache.hadoop.util.ToolRunner;
 import org.apache.mahout.common.AbstractJob;
+import org.apache.mahout.common.Pair;
+import org.apache.mahout.common.iterator.sequencefile.PathType;
+import org.apache.mahout.common.iterator.sequencefile.SequenceFileDirIterator;
+import org.apache.mahout.math.Matrix;
+import org.apache.mahout.math.SequentialAccessSparseVector;
 import org.apache.mahout.math.Vector;
 import org.apache.mahout.math.VectorWritable;
+import org.apache.mahout.math.map.OpenIntObjectHashMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -25,11 +27,12 @@ import redis.clients.jedis.JedisPoolConfig;
 import redis.clients.jedis.Pipeline;
 
 import com.google.common.primitives.Ints;
+import com.skp.experiment.math.als.hadoop.ImplicitFeedbackAlternatingLeastSquaresSolver;
 
 public class TestRedisJob extends AbstractJob {
   private static final String HOST_NAME = "20.20.20.31";
   private static final Logger log = LoggerFactory.getLogger(TestRedisJob.class);
-  
+  private ImplicitFeedbackAlternatingLeastSquaresSolver solver;
   public static void main(String[] args) throws Exception {
     ToolRunner.run(new TestRedisJob(), args);
   }
@@ -37,28 +40,34 @@ public class TestRedisJob extends AbstractJob {
   public int run(String[] args) throws Exception {
     addInputOption();
     addOutputOption();
-    addOption("userRatings", null, "user ratings");
+    addOption("indexSizes", null, ".");
+    addOption("numFeatures", null, ",", String.valueOf(30));
+    addOption("m", null, ",");
+    
     Map<String, String> parsedArgs = parseArguments(args);
     if (parsedArgs == null) {
       return -1;
     }
-    try {
-      Job job = prepareJob(getInputPath(), getOutputPath(), SequenceFileInputFormat.class, 
-      Map1.class, IntWritable.class, VectorWritable.class, SequenceFileOutputFormat.class);
-      job.waitForCompletion(true);
-      
-      FileSystem fs = FileSystem.get(getConf());
-      fs.delete(getOutputPath(), true);
-      
-      Job job2 = prepareJob(new Path(getOption("userRatings")), getOutputPath(), SequenceFileInputFormat.class, 
-          Map2.class, IntWritable.class, VectorWritable.class, SequenceFileOutputFormat.class);
-      job2.waitForCompletion(true);
-    } finally {
-      if (!flushAll()) {
-        return -1;
-      }
+    long startTime = System.currentTimeMillis();
+    Map<String, String> indexSizesTmp = ALSMatrixUtil.fetchTextFiles(new Path(getOption("indexSizes")), ",", 
+        Arrays.asList(0), Arrays.asList(1));
+    int numUsers = Integer.parseInt(indexSizesTmp.get("0")) + 1;
+    int numItems = Integer.parseInt(indexSizesTmp.get("1")) + 1;
+    int numFeatures = Integer.parseInt(getOption("numFeatures"));
+    Path M = new Path(getOption("m"));
+    Matrix Y = ALSMatrixUtil.readDenseMatrixByRows(M, getConf(), numItems, numFeatures);
+    Matrix YtransposeY = Y.transpose().times(Y);
+    System.out.println("Y Size: " + Y.numRows() + "\t" + Y.numCols());
+    solver = new ImplicitFeedbackAlternatingLeastSquaresSolver(numFeatures, 0.065, 40, Y, YtransposeY);
+    SequenceFileDirIterator<IntWritable, VectorWritable> ratings = 
+        new SequenceFileDirIterator<IntWritable, VectorWritable>(getInputPath(), PathType.LIST, null, null, true, getConf());
+    while (ratings.hasNext()) {
+      Pair<IntWritable, VectorWritable> rating = ratings.next();
+      Vector v = new SequentialAccessSparseVector(rating.getSecond().get());
+      System.out.println("in" + rating.getFirst() + "\t" + rating.getSecond());
+      Vector uiOrmj = solver.solve(v);
+      System.out.println(rating.getFirst() + "\t" + uiOrmj);
     }
-    
     return 0;
   }
   

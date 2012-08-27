@@ -1,8 +1,7 @@
 package com.skp.experiment.cf.als.hadoop;
 
-import java.io.BufferedReader;
 import java.io.IOException;
-import java.io.InputStreamReader;
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.Iterator;
@@ -25,14 +24,15 @@ import org.apache.mahout.common.iterator.sequencefile.PathFilters;
 import org.apache.mahout.common.iterator.sequencefile.PathType;
 import org.apache.mahout.common.iterator.sequencefile.SequenceFileDirIterable;
 import org.apache.mahout.common.iterator.sequencefile.SequenceFileDirValueIterator;
+import org.apache.mahout.common.iterator.sequencefile.SequenceFileIterator;
 import org.apache.mahout.math.DenseMatrix;
 import org.apache.mahout.math.Matrix;
 import org.apache.mahout.math.MatrixSlice;
+import org.apache.mahout.math.RandomAccessSparseVector;
 import org.apache.mahout.math.SparseMatrix;
 import org.apache.mahout.math.Vector;
 import org.apache.mahout.math.VectorWritable;
 import org.apache.mahout.math.hadoop.DistributedRowMatrix;
-import org.apache.mahout.math.list.IntArrayList;
 import org.apache.mahout.math.map.OpenHashMap;
 import org.apache.mahout.math.map.OpenIntObjectHashMap;
 
@@ -85,6 +85,46 @@ public class ALSMatrixUtil {
       int rowIndex = pair.getFirst().get();
       Vector row = pair.getSecond().get().clone();
       matrix.put(rowIndex, row);
+    }
+    return matrix;
+  }
+  
+  
+  private static class MatrixLoaderThread extends Thread {
+    public static Matrix matrix;
+    private SequenceFileIterator<IntWritable, VectorWritable> iter;
+    MatrixLoaderThread(SequenceFileIterator<IntWritable, VectorWritable> i) throws IOException {
+     iter = i;
+    }
+   
+    @Override
+    public void run() {
+      while (iter.hasNext()) {
+        Pair<IntWritable, VectorWritable> pair = iter.next();
+        int rowId = pair.getFirst().get();
+        Iterator<Vector.Element> cols = pair.getSecond().get().iterateNonZero();
+        while (cols.hasNext()) {
+          Vector.Element col = cols.next();
+          matrix.set(rowId, col.index(), col.get());
+        }
+      }
+    }
+  }
+  public static Matrix readMatrixByRowsMultithred(Path dir, Configuration conf, int numRows, int numCols) 
+      throws IOException, InterruptedException {
+    Matrix matrix = new DenseMatrix(numRows, numCols);
+    MatrixLoaderThread.matrix = matrix;
+    List<MatrixLoaderThread> runners = new ArrayList<MatrixLoaderThread>();
+    FileStatus[] status = FileSystem.get(conf).globStatus(new Path(dir.toString() + "/part*"));
+    for (FileStatus file : status) {
+      SequenceFileIterator<IntWritable, VectorWritable> iter = 
+          new SequenceFileIterator<IntWritable, VectorWritable>(file.getPath(), true, conf);
+      MatrixLoaderThread thread = new MatrixLoaderThread(iter);
+      thread.start();
+      runners.add(thread);
+    }
+    for (MatrixLoaderThread thread : runners) {
+      thread.join();
     }
     return matrix;
   }
@@ -159,7 +199,7 @@ public class ALSMatrixUtil {
   }
   
   public static Matrix readDistributedRowMatrix(Path dir, Configuration conf, int numRows, int numCols) {
-    Matrix result = new SparseMatrix(numRows, numCols);
+    Matrix result = new DenseMatrix(numRows, numCols);
     DistributedRowMatrix X = new DistributedRowMatrix(dir, new Path("/tmp/multiply"), numRows, numCols);
     X.setConf(conf);
     Iterator<MatrixSlice> rows = X.iterator();

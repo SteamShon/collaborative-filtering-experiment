@@ -22,6 +22,8 @@ import java.io.IOException;
 import java.io.OutputStreamWriter;
 import java.net.InetAddress;
 import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
@@ -39,6 +41,7 @@ import org.apache.hadoop.io.SequenceFile;
 import org.apache.hadoop.io.Text;
 import org.apache.hadoop.mapreduce.Job;
 import org.apache.hadoop.mapreduce.Mapper;
+import org.apache.hadoop.mapreduce.Mapper.Context;
 import org.apache.hadoop.mapreduce.lib.input.SequenceFileInputFormat;
 import org.apache.hadoop.mapreduce.lib.input.TextInputFormat;
 import org.apache.hadoop.mapreduce.lib.output.SequenceFileOutputFormat;
@@ -69,7 +72,6 @@ import org.slf4j.LoggerFactory;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.Lists;
 import com.google.common.io.Closeables;
-import com.skp.experiment.cf.evaluate.hadoop.EvaluatorUtil;
 import com.skp.experiment.cf.math.hadoop.MatrixDistanceSquaredJob;
 import com.skp.experiment.common.HadoopClusterUtil;
 import com.skp.experiment.common.Text2DistributedRowMatrixJob;
@@ -129,7 +131,11 @@ public class ParallelALSFactorizationJob extends AbstractJob {
   private static final int multiplyMapTasks = 100000;
   private static int rateIndex = 2;
   private static final float SAFE_MARGIN = 3.5f;
-  
+  private static enum COUNTER {
+    SETUP,
+    CLEANUP,
+    MAP
+  }
   
   public static void main(String[] args) throws Exception {
     ToolRunner.run(new ParallelALSFactorizationJob(), args);
@@ -177,23 +183,26 @@ public class ParallelALSFactorizationJob extends AbstractJob {
       cleanUp = Boolean.parseBoolean(getOption("cleanUp"));
       useTransform = Boolean.parseBoolean(getOption("useTransform"));
       rateIndex = Integer.parseInt(getOption("rateIndex"));
-      
-      if (useTransform) {
-        // transform price into rating
-        Job transformJob = prepareJob(getInputPath(), pathToTransformed(), TextInputFormat.class, 
-            TransformColumnValueMapper.class, NullWritable.class, Text.class, 
-            TextOutputFormat.class);
-        transformJob.waitForCompletion(true);
-      } else {
-        
-        FileUtil.copy(FileSystem.get(getConf()), getInputPath(), 
-            FileSystem.get(getConf()), pathToTransformed(), false, getConf());
+      FileSystem fs = FileSystem.get(getConf());
+      if (!fs.exists(pathToTransformed())) {
+        if (useTransform) {
+          // transform price into rating
+          Job transformJob = prepareJob(getInputPath(), pathToTransformed(), TextInputFormat.class, 
+              TransformColumnValueMapper.class, NullWritable.class, Text.class, 
+              TextOutputFormat.class);
+          transformJob.waitForCompletion(true);
+        } else {
+          
+          FileUtil.copy(FileSystem.get(getConf()), getInputPath(), 
+              FileSystem.get(getConf()), pathToTransformed(), false, getConf());
+        }
       }
-      
+      /*
       if (getOption("oldM") != null) {
         runOnetimeSolver(pathToTransformed(), getOutputPath("U"), new Path(getOption("oldM")));
         return 0;
       }
+      */
       /*
           * compute the factorization A = U M'
           *
@@ -202,52 +211,60 @@ public class ParallelALSFactorizationJob extends AbstractJob {
           *           M (items x features) is the representation of items in the feature space
           */
       if (startIteration == 0) {
-        // create A' 
-        Job itemRatings = prepareJob(pathToTransformed(), pathToItemRatings(),
-            TextInputFormat.class, ItemRatingVectorsMapper.class, IntWritable.class,
-            VectorWritable.class, VectorSumReducer.class, IntWritable.class,
-            VectorWritable.class, SequenceFileOutputFormat.class);
-        itemRatings.setCombinerClass(VectorSumReducer.class);
-        long matrixSizeExp = (long)(8L * numUsers * numFeatures * SAFE_MARGIN);
-        long memoryThreshold = HadoopClusterUtil.PHYSICAL_MEMERY_LIMIT / (long)HadoopClusterUtil.MAP_TASKS_PER_NODE;
-        int numTaskPerDataNode = Math.max(1, (int) (HadoopClusterUtil.PHYSICAL_MEMERY_LIMIT / (double)matrixSizeExp));
-        //log.info("matrix Size: " + matrixSizeExp + ", memorhThreshold: " + memoryThreshold + ", numTaskPerDataNode: " + numTaskPerDataNode);
-        if (matrixSizeExp > memoryThreshold) {
-          //log.info("A: {}", numTaskPerDataNode * HadoopClusterUtil.getNumberOfTaskTrackers(getConf()));
-          int numReducer = Math.min(numTaskPerDataNode * HadoopClusterUtil.getNumberOfTaskTrackers(getConf()), 
-              HadoopClusterUtil.getMaxMapTasks(getConf()));
-          //log.info("Number Of Reducer: " + numReducer);
-          itemRatings.setNumReduceTasks(numReducer);
+        if (!fs.exists(pathToItemRatings())) {
+          // create A' 
+          Job itemRatings = prepareJob(pathToTransformed(), pathToItemRatings(),
+              TextInputFormat.class, ItemRatingVectorsMapper.class, IntWritable.class,
+              VectorWritable.class, VectorSumReducer.class, IntWritable.class,
+              VectorWritable.class, SequenceFileOutputFormat.class);
+          itemRatings.setCombinerClass(VectorSumReducer.class);
+          long matrixSizeExp = (long)(8L * numUsers * numFeatures * SAFE_MARGIN);
+          long memoryThreshold = HadoopClusterUtil.PHYSICAL_MEMERY_LIMIT / (long)HadoopClusterUtil.MAP_TASKS_PER_NODE;
+          int numTaskPerDataNode = Math.max(1, (int) (HadoopClusterUtil.PHYSICAL_MEMERY_LIMIT / (double)matrixSizeExp));
+          //log.info("matrix Size: " + matrixSizeExp + ", memorhThreshold: " + memoryThreshold + ", numTaskPerDataNode: " + numTaskPerDataNode);
+          if (matrixSizeExp > memoryThreshold) {
+            //log.info("A: {}", numTaskPerDataNode * HadoopClusterUtil.getNumberOfTaskTrackers(getConf()));
+            int numReducer = Math.min(numTaskPerDataNode * HadoopClusterUtil.getNumberOfTaskTrackers(getConf()), 
+                HadoopClusterUtil.getMaxMapTasks(getConf()));
+            //log.info("Number Of Reducer: " + numReducer);
+            itemRatings.setNumReduceTasks(numReducer);
+          }
+          
+          itemRatings.waitForCompletion(true);
         }
         
-        itemRatings.waitForCompletion(true);
+        if (!fs.exists(pathToUserRatings())) {
+          Job userRatings = prepareJob(pathToItemRatings(), pathToUserRatings(),
+              TransposeMapper.class, IntWritable.class, VectorWritable.class, MergeVectorsReducer.class, IntWritable.class,
+              VectorWritable.class);
+          userRatings.setNumReduceTasks(HadoopClusterUtil.getNumberOfTaskTrackers(getConf()));
+          userRatings.setCombinerClass(MergeVectorsCombiner.class);
+          userRatings.setNumReduceTasks(HadoopClusterUtil.getMaxMapTasks(getConf()));
+          userRatings.waitForCompletion(true);
+        }
+        if (!fs.exists(getOutputPath("userItemCnt"))) {
+          // count item per user
+          Job userItemCntsJob = prepareJob(pathToUserRatings(), getOutputPath("userItemCnt"), SequenceFileInputFormat.class, 
+              UserItemCntsMapper.class, IntWritable.class, IntWritable.class, SequenceFileOutputFormat.class);
+          userItemCntsJob.setJobName("user ratings count");
+          userItemCntsJob.waitForCompletion(true);
+        }
         
-        Job userRatings = prepareJob(pathToItemRatings(), pathToUserRatings(),
-            TransposeMapper.class, IntWritable.class, VectorWritable.class, MergeVectorsReducer.class, IntWritable.class,
-            VectorWritable.class);
-        userRatings.setNumReduceTasks(HadoopClusterUtil.getNumberOfTaskTrackers(getConf()));
-        userRatings.setCombinerClass(MergeVectorsCombiner.class);
-        userRatings.setNumReduceTasks(HadoopClusterUtil.getMaxMapTasks(getConf()));
-        userRatings.waitForCompletion(true);
-        
-        // count item per user
-        Job userItemCntsJob = prepareJob(pathToUserRatings(), getOutputPath("userItemCnt"), SequenceFileInputFormat.class, 
-            UserItemCntsMapper.class, IntWritable.class, IntWritable.class, SequenceFileOutputFormat.class);
-        userItemCntsJob.setJobName("user ratings count");
-        userItemCntsJob.waitForCompletion(true);
-        
-        //TODO this could be fiddled into one of the upper jobs
-        Job averageItemRatings = prepareJob(pathToItemRatings(), getTempPath("averageRatings"),
-            AverageRatingMapper.class, IntWritable.class, VectorWritable.class, MergeVectorsReducer.class,
-            IntWritable.class, VectorWritable.class);
-        averageItemRatings.setCombinerClass(MergeVectorsCombiner.class);
-        averageItemRatings.waitForCompletion(true);
-
-        Vector averageRatings = ALSMatrixUtil.readFirstRow(getTempPath("averageRatings"), getConf());
-
-
-        /** create an initial M */
-        initializeM(averageRatings);
+        if (!fs.exists(getTempPath("averageRatings"))) {
+          //TODO this could be fiddled into one of the upper jobs
+          Job averageItemRatings = prepareJob(pathToItemRatings(), getTempPath("averageRatings"),
+              AverageRatingMapper.class, IntWritable.class, VectorWritable.class, MergeVectorsReducer.class,
+              IntWritable.class, VectorWritable.class);
+          averageItemRatings.setCombinerClass(MergeVectorsCombiner.class);
+          averageItemRatings.waitForCompletion(true);
+        }
+        if (!fs.exists(new Path(pathToM(-1), "part-m-00000"))) {
+          Vector averageRatings = ALSMatrixUtil.readFirstRow(getTempPath("averageRatings"), getConf());
+  
+  
+          /** create an initial M */
+          initializeM(averageRatings);
+        }
       }
       
       for (int currentIteration = startIteration; currentIteration < numIterations; currentIteration++) {
@@ -287,7 +304,6 @@ public class ParallelALSFactorizationJob extends AbstractJob {
           log.info("iteration {}: {}", currentIteration, currentRMSE); 
         }
         if (currentIteration >= startIteration + 2 && cleanUp) {
-          FileSystem fs = FileSystem.get(getConf());
           fs.deleteOnExit(pathToU(currentIteration - 2));
           fs.deleteOnExit(pathToM(currentIteration - 2));
         }
@@ -313,7 +329,7 @@ public class ParallelALSFactorizationJob extends AbstractJob {
     fs.delete(path, true);
     return result;
   }
-  
+  /*
   private void runOnetimeSolver(Path input, Path output, Path oldMPath) throws Exception {
     ToolRunner.run(new Text2DistributedRowMatrixJob(), new String[] {
       "-i", input.toString(), "-o", pathToUserRatings().toString(), 
@@ -345,7 +361,7 @@ public class ParallelALSFactorizationJob extends AbstractJob {
     
     solverForU.waitForCompletion(true);
   }
-  
+  */
   private void initializeM(Vector averageRatings) throws IOException {
     Random random = RandomUtils.getRandom();
 
@@ -399,16 +415,21 @@ public class ParallelALSFactorizationJob extends AbstractJob {
     @Override
     protected void map(LongWritable offset, Text line, Context ctx) throws IOException, InterruptedException {
       String[] tokens = TasteHadoopUtils.splitPrefTokens(line.toString());
-      int sz = tokens.length;
-      int userID = Integer.parseInt(tokens[0]);
-      int itemID = Integer.parseInt(tokens[1]);
-      float rating = Float.parseFloat(tokens[sz-1]);
-      
-      
-      Vector ratings = new RandomAccessSparseVector(Integer.MAX_VALUE, 1);
-      ratings.set(userID, rating);
-      outKey.set(itemID);
-      ctx.write(outKey, new VectorWritable(ratings));
+      try {
+        int sz = tokens.length;
+        int userID = Integer.parseInt(tokens[0]);
+        int itemID = Integer.parseInt(tokens[1]);
+        float rating = Float.parseFloat(tokens[sz-1]);
+        
+        
+        Vector ratings = new RandomAccessSparseVector(Integer.MAX_VALUE, 1);
+        ratings.set(userID, rating);
+        outKey.set(itemID);
+        ctx.write(outKey, new VectorWritable(ratings));
+      } catch (NumberFormatException e) {
+        log.info(line.toString());
+        return;
+      }
     }
   }
   
@@ -416,7 +437,7 @@ public class ParallelALSFactorizationJob extends AbstractJob {
       throws ClassNotFoundException, IOException, InterruptedException {
     @SuppressWarnings("rawtypes")
     Class<? extends Mapper> solverMapper = implicitFeedback ?
-        SolveImplicitFeedbackMapper.class : SolveExplicitFeedbackMapper.class;
+        SolveImplicitFeedbackMultithreadedMapper.class : SolveExplicitFeedbackMapper.class;
 
     Job solverForUorI = prepareJob(ratings, output, SequenceFileInputFormat.class, solverMapper, IntWritable.class,
         VectorWritable.class, SequenceFileOutputFormat.class);
@@ -434,8 +455,9 @@ public class ParallelALSFactorizationJob extends AbstractJob {
       solverConf.setInt("mapred.map.tasks", HadoopClusterUtil.getNumberOfTaskTrackers(getConf()));
       solverConf.setLong("mapred.min.split.size", HadoopClusterUtil.getMaxBlockSize(getConf(), pathToTransformed()));
       solverConf.setLong("mapred.max.split.size", HadoopClusterUtil.getMaxBlockSize(getConf(), pathToTransformed()));
-      solverConf.set("lock.file", pathToHostLocks().toString());
-      solverConf.setInt("lock.file.nums", Math.min(HadoopClusterUtil.MAP_TASKS_PER_NODE, numTaskPerDataNode));
+      solverConf.set(SolveImplicitFeedbackMultithreadedMapper.LOCK_FILE, pathToHostLocks().toString());
+      solverConf.setInt(SolveImplicitFeedbackMultithreadedMapper.LOCK_FILE_NUMS, 
+          Math.min(HadoopClusterUtil.MAP_TASKS_PER_NODE, numTaskPerDataNode));
     } else {
       solverConf.setLong("mapred.min.split.size", HadoopClusterUtil.getMinInputSplitSizeMax(getConf(), ratings));
       solverConf.setLong("mapred.max.split.size", HadoopClusterUtil.getMinInputSplitSizeMax(getConf(), ratings));
@@ -445,12 +467,12 @@ public class ParallelALSFactorizationJob extends AbstractJob {
     solverConf.setLong("mapred.task.timeout", taskTimeout);
     solverConf.setBoolean("mapred.map.tasks.speculative.execution", false);
     
-    solverConf.set(LAMBDA, String.valueOf(lambda));
-    solverConf.set(ALPHA, String.valueOf(alpha));
-    solverConf.setInt(NUM_FEATURES, numFeatures);
-    solverConf.setInt(NUM_ROWS, numRows);
-    solverConf.set(FEATURE_MATRIX, pathToUorI.toString());
-    solverConf.set(FEATURE_MATRIX_TRANSPOSE, pathToTranspose.toString());
+    solverConf.set(SolveImplicitFeedbackMultithreadedMapper.LAMBDA, String.valueOf(lambda));
+    solverConf.set(SolveImplicitFeedbackMultithreadedMapper.ALPHA, String.valueOf(alpha));
+    solverConf.setInt(SolveImplicitFeedbackMultithreadedMapper.NUM_FEATURES, numFeatures);
+    solverConf.setInt(SolveImplicitFeedbackMultithreadedMapper.NUM_ROWS, numRows);
+    solverConf.set(SolveImplicitFeedbackMultithreadedMapper.FEATURE_MATRIX, pathToUorI.toString());
+    solverConf.set(SolveImplicitFeedbackMultithreadedMapper.FEATURE_MATRIX_TRANSPOSE, pathToTranspose.toString());
     
     solverForUorI.waitForCompletion(true);
   }
@@ -494,17 +516,22 @@ public class ParallelALSFactorizationJob extends AbstractJob {
       ctx.write(userOrItemID, new VectorWritable(uiOrmj));
     }
   }
-  
-  public static class SolveImplicitFeedbackMapper extends Mapper<IntWritable,VectorWritable,IntWritable,VectorWritable> {
+  /*
+  public static class SolveImplicitFeedbackMapper extends MultithreadedMapper<IntWritable,VectorWritable,IntWritable,VectorWritable> {
 
     private ImplicitFeedbackAlternatingLeastSquaresSolver solver;
     private String lockPath = null;
     private long sleepPeriod = 30000;
     private int lockNums;
     private Path currentLockPath = null;
-    
+    //private static OpenIntObjectHashMap<Vector> Y;
+    private static Matrix Y;
+    private static Matrix YtransposeY;
+    private static Map<Integer, Vector> outputMap = Collections.synchronizedMap(new HashMap<Integer, Vector>());
+    private static StringBuffer sb = new StringBuffer();
     @Override
     protected void setup(Context ctx) throws IOException, InterruptedException {
+      ctx.getCounter(COUNTER.SETUP).increment(1);
       Configuration conf = ctx.getConfiguration();
       double lambda = Double.parseDouble(ctx.getConfiguration().get(LAMBDA));
       double alpha = Double.parseDouble(ctx.getConfiguration().get(ALPHA));
@@ -518,13 +545,13 @@ public class ParallelALSFactorizationJob extends AbstractJob {
         checkLock(ctx, lockNums);
       }
       
-      //OpenIntObjectHashMap<Vector> Y = ALSMatrixUtil.readMatrixByRows(YPath, ctx.getConfiguration());
-      //OpenIntObjectHashMap<Vector> Y = ALSMatrixUtil.readMatrixByRows(YPath, ctx);
-      Matrix Y = ALSMatrixUtil.readDenseMatrixByRows(YPath, ctx, numRows, numFeatures);
-      Matrix YtransposeY = ALSMatrixUtil.readDistributedRowMatrix(YtransposeYPath, numFeatures, numFeatures);
+      //Y = ALSMatrixUtil.readMatrixByRows(YPath, ctx.getConfiguration());
+      //Y = ALSMatrixUtil.readMatrixByRows(YPath, ctx);
+      Y = ALSMatrixUtil.readDenseMatrixByRows(YPath, ctx, numRows, numFeatures);
+      YtransposeY = ALSMatrixUtil.readDistributedRowMatrix(YtransposeYPath, numFeatures, numFeatures);
       
       solver = new ImplicitFeedbackAlternatingLeastSquaresSolver(numFeatures, lambda, alpha, Y, YtransposeY);
-
+      ctx.setStatus("Size: " + Y.rowSize() + "," + Y.columnSize());
       Preconditions.checkArgument(numFeatures > 0, "numFeatures was not set correctly!");
     }
     private void checkLock(Context ctx, int lockNums) throws InterruptedException, IOException {
@@ -561,6 +588,15 @@ public class ParallelALSFactorizationJob extends AbstractJob {
     @Override
     protected void cleanup(Context context) throws IOException,
         InterruptedException {
+      context.getCounter(COUNTER.CLEANUP).increment(1);
+      context.setStatus("cleanup size: " + Y.rowSize() + "," + Y.columnSize());
+      context.setStatus(sb.toString());
+      for (Entry<Integer, Vector> output : outputMap.entrySet()) {
+        context.write(new IntWritable(output.getKey()), new VectorWritable(output.getValue()));
+        log.info(output.getKey() + "\t" + output.getValue());
+        System.out.println(output.getKey() + "\t" + output.getValue());
+        //context.setStatus(output.getKey() + "\t" + output.getValue());
+      }
       if (currentLockPath != null) {
         FileSystem fs = FileSystem.get(context.getConfiguration());
         fs.deleteOnExit(currentLockPath);
@@ -570,13 +606,21 @@ public class ParallelALSFactorizationJob extends AbstractJob {
     @Override
     protected void map(IntWritable userOrItemID, VectorWritable ratingsWritable, Context ctx)
         throws IOException, InterruptedException {
+      ctx.getCounter(COUNTER.MAP).increment(1);
       Vector ratings = new SequentialAccessSparseVector(ratingsWritable.get());
 
       Vector uiOrmj = solver.solve(ratings);
-      ctx.write(userOrItemID, new VectorWritable(uiOrmj));
+      //ctx.write(userOrItemID, new VectorWritable(uiOrmj));
+      sb.append(userOrItemID.get() + "\t" + uiOrmj.toString() + "\t");
+      //outputMap.put(userOrItemID.get(), uiOrmj);
+      outputMap.put(userOrItemID.get(), ratings);
+      log.info(userOrItemID.get() + "\t" + uiOrmj.size() + "\t" + uiOrmj.toString());
+      System.out.println(userOrItemID.get() + "\t" + uiOrmj.toString());
     }
+   
+    
   }
-
+  */
   public static class AverageRatingMapper extends Mapper<IntWritable,VectorWritable,IntWritable,VectorWritable> {
     @Override
     protected void map(IntWritable r, VectorWritable v, Context ctx) throws IOException, InterruptedException {

@@ -3,14 +3,17 @@
 
 * * *
 ## Collaborative filtering algorithm(als-wr) which is based on matrix factorization(from mahout).
-This is implementation for [Collaborative Filtering](http://research.yahoo.com/pub/2433) using Matrix factorization for implicit feedback. 
+This is multithreaded implementation for [Collaborative Filtering](http://research.yahoo.com/pub/2433)(ALS-WR) using Matrix factorization for implicit feedback. 
 
 *Heavily stolen from Mahout 0.7. if your matrix can be loaded into memory, then just use mahout.*
 
-When either fatorized matrix U or M is too large(larger than mapred.map.child.java.opts), then your child process may throw OutOfMemory exception.
+### Why re-implement algorithm in mahout? problems were follwing.
+1. U/M matrix is too large(about 8G in 2D float array) for mapred.map.child.java.opts. mahout implementation runs out of heap space when load U/M matrix into memory. I used hdfs file lock and fair scheduler to force not too many map task runs simultaneously on same datanode.
+2. loading U/M matrix into memory for each setup is single threaded. since keys in each part hdfs files are mutual exclusive(key is row id), it is safe to run multiple thread to read multiple part hdfs file into memory.
+3. even though U/M is loaded into memory, single thread to calculate current ui, mj is too slow. note that each ui, mj can be run simultaneously using multiple thread. I added multithreadedMapMapper to span multithreaded map method.
 
-There is obvious trade-off between speed and # of simultaneous map tasks on each datanode because mahout implementation load matrix into memory.
-To make sure only certain number of map task runs simultaneosly on each datanode, I used hdfs file lock with busy waiting.
+using multithread in map task, it runs 3 times(used 10 thread per task) fater than single threaded. 
+Still need to figure out how to emit asyncronously in mapper.
 
 * * *
 ### Run

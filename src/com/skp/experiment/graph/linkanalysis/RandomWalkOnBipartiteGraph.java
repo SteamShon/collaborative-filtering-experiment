@@ -259,7 +259,7 @@ public class RandomWalkOnBipartiteGraph extends AbstractJob {
     ToolRunner.run(new ImprovedRepartitionJoinAndFilterJob(), new String[]{
       "-i", tmpOutput.toString(), "-o", output.toString(), 
       "-sidx", "0,1", "-tgt", train.toString() + ":0,1:0,1:2:outer", 
-      "--defaultValue", "0"
+      "--defaultValue", "-1"
     });
     return 0;
   }
